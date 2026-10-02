@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Dashboard Populasi Malaysia — DOSM</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root{--bg:#07111f;--p:#0f1d2e;--p2:#13263b;--t:#f4f8ff;--m:#9fb0c4;--a:#48d6c5;--line:rgba(255,255,255,.09)}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#06101d,#0a1830 58%,#102844);color:var(--t);font:14px/1.45 Inter,Segoe UI,Arial,sans-serif}
+.wrap{max-width:1500px;margin:auto;padding:24px}.hero{display:flex;justify-content:space-between;gap:20px;align-items:end}.ey{color:var(--a);font-weight:800;letter-spacing:.13em;font-size:12px}h1{font-size:42px;margin:4px 0}.sub{color:var(--m)}
+.status{padding:10px 14px;border:1px solid var(--line);border-radius:99px;background:rgba(255,255,255,.05)}
+.filters,.card,.box{background:rgba(15,29,46,.9);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 40px rgba(0,0,0,.22)}
+.filters{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;padding:15px;margin:18px 0}.filters label{display:block;color:var(--m);font-size:12px;margin-bottom:5px}
+select,input{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:#091626;color:var(--t)}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.card{padding:17px;min-height:105px}.lab{color:var(--m);font-size:12px}.val{font-size:28px;font-weight:800;margin-top:8px}
+.grid2{display:grid;grid-template-columns:1.3fr 1fr;gap:14px;margin-top:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}.box{padding:12px}.plot{height:340px}.box h3{margin:4px 8px}
+.tablebox{margin-top:14px}.scroll{max-height:520px;overflow:auto}table{width:100%;border-collapse:collapse;background:#091626}th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}th{position:sticky;top:0;background:#13263b}
+.error{display:none;margin:14px 0;background:#3a1520;color:#ffd8df;border:1px solid #71303e;padding:12px;border-radius:12px}
+.note{color:var(--m);font-size:12px;margin:8px}.small{font-size:12px;color:var(--m)}
+@media(max-width:900px){.filters{grid-template-columns:repeat(2,1fr)}.cards{grid-template-columns:repeat(2,1fr)}.grid2,.grid3{grid-template-columns:1fr}}
+@media(max-width:560px){.hero{align-items:flex-start;flex-direction:column}.filters,.cards{grid-template-columns:1fr}h1{font-size:32px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div><div class="ey">OPEN DOSM • DATA RASMI</div><h1>Dashboard Populasi Malaysia</h1><div class="sub">Dashboard interaktif menggunakan API Data Catalogue Malaysia.</div></div>
+    <div class="status" id="status">⏳ Memuatkan data…</div>
+  </div>
+  <div id="err" class="error"></div>
+
+  <div class="filters">
+    <div><label>Tarikh / Tahun</label><select id="fDate"><option value="">Semua</option></select></div>
+    <div><label>Jantina</label><select id="fSex"><option value="">Semua</option></select></div>
+    <div><label>Umur</label><select id="fAge"><option value="">Semua</option></select></div>
+    <div><label>Etnik</label><select id="fEth"><option value="">Semua</option></select></div>
+    <div><label>Carian Jadual</label><input id="search" placeholder="Cari data..."/></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="lab">Jumlah Populasi</div><div class="val" id="kTotal">—</div><div class="small" id="kDate">—</div></div>
+    <div class="card"><div class="lab">Lelaki</div><div class="val" id="kMale">—</div><div class="small">Berdasarkan penapis semasa</div></div>
+    <div class="card"><div class="lab">Perempuan</div><div class="val" id="kFemale">—</div><div class="small">Berdasarkan penapis semasa</div></div>
+    <div class="card"><div class="lab">Bilangan Rekod</div><div class="val" id="kRows">—</div><div class="small">Selepas penapisan</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="box"><h3>Trend Populasi</h3><div id="trend" class="plot"></div></div>
+    <div class="box"><h3>Komposisi Jantina</h3><div id="sex" class="plot"></div></div>
+  </div>
+  <div class="grid3">
+    <div class="box"><h3>Populasi Mengikut Umur</h3><div id="age" class="plot"></div></div>
+    <div class="box"><h3>Populasi Mengikut Etnik</h3><div id="eth" class="plot"></div></div>
+    <div class="box"><h3>Ringkasan Data</h3><div id="summary" class="plot"></div></div>
+  </div>
+
+  <div class="box tablebox"><h3>Jadual Data DOSM</h3><div class="scroll"><table id="tbl"></table></div><div class="note">Sumber: Department of Statistics Malaysia (DOSM), Data Catalogue Malaysia.</div></div>
+</div>
+
+<script>
+const API='https://api.data.gov.my/data-catalogue?id=population_malaysia&limit=10000';
+let RAW=[], COL={};
+
+const cand={
+date:['date','year','tahun'],
+sex:['sex','gender','jantina'],
+age:['age','umur','age_group','agegroup'],
+eth:['ethnicity','ethnic','race','etnik'],
+value:['population','pop','value','jumlah','count']
+};
+
+function findCol(keys){
+ if(!RAW.length)return null;
+ const cols=Object.keys(RAW[0]), low=cols.map(x=>x.toLowerCase());
+ for(const k of keys){let i=low.indexOf(k);if(i>=0)return cols[i]}
+ return null
+}
+const nfmt=n=>{
+ n=Number(n);if(!Number.isFinite(n))return '—';
+ if(Math.abs(n)>=1e6)return (n/1e6).toLocaleString('ms-MY',{maximumFractionDigits:2})+' juta';
+ return n.toLocaleString('ms-MY',{maximumFractionDigits:1})
+};
+function layout(extra={}){
+ return Object.assign({margin:{l:50,r:18,t:25,b:52},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{color:'#dce8f6'},xaxis:{gridcolor:'rgba(255,255,255,.07)'},yaxis:{gridcolor:'rgba(255,255,255,.07)'},showlegend:false},extra)
+}
+const cfg={responsive:true,displayModeBar:false};
+
+function uniq(c){return [...new Set(RAW.map(r=>r[c]).filter(v=>v!==null&&v!==undefined&&v!==''))].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}))}
+function fill(id,c){
+ const el=document.getElementById(id);
+ if(!c){el.disabled=true;return}
+ el.innerHTML='<option value="">Semua</option>'+uniq(c).map(v=>`<option value="${String(v).replaceAll('"','&quot;')}">${v}</option>`).join('')
+}
+function smartDefaults(){
+ if(COL.date){const e=document.getElementById('fDate');if(e.options.length>1)e.selectedIndex=e.options.length-1}
+ for(const [id,c] of [['fSex',COL.sex],['fAge',COL.age],['fEth',COL.eth]]){
+  if(!c)continue;const e=document.getElementById(id);
+  const o=[...e.options].find(x=>['overall','all','total','both sexes','both','semua','jumlah','all ages','0-100+'].includes(String(x.value).toLowerCase()));
+  if(o)e.value=o.value;
+ }
+}
+function filtered(exclude=null){
+ const map=[['date','fDate'],['sex','fSex'],['age','fAge'],['eth','fEth']];
+ return RAW.filter(r=>map.every(([k,id])=>k===exclude||!COL[k]||!document.getElementById(id).value||String(r[COL[k]])===document.getElementById(id).value))
+}
+function sum(rows){return COL.value?rows.reduce((a,r)=>a+(Number(r[COL.value])||0),0):0}
+function group(rows,c){
+ const m=new Map();for(const r of rows){const k=String(r[c]);m.set(k,(m.get(k)||0)+(Number(r[COL.value])||0))}return [...m.entries()]
+}
+function update(){
+ const rows=filtered();
+ document.getElementById('kRows').textContent=rows.length.toLocaleString('ms-MY');
+ document.getElementById('kTotal').textContent=COL.value?nfmt(sum(rows)):'—';
+ document.getElementById('kDate').textContent=document.getElementById('fDate').value||'Semua tarikh';
+
+ if(COL.sex&&COL.value){
+  const g=group(filtered('sex'),COL.sex);
+  const male=g.find(x=>['male','lelaki','m'].includes(x[0].toLowerCase()));
+  const female=g.find(x=>['female','perempuan','f'].includes(x[0].toLowerCase()));
+  document.getElementById('kMale').textContent=male?nfmt(male[1]):'—';
+  document.getElementById('kFemale').textContent=female?nfmt(female[1]):'—';
+  Plotly.react('sex',[{labels:g.map(x=>x[0]),values:g.map(x=>x[1]),type:'pie',hole:.56,textinfo:'label+percent'}],layout({showlegend:true,legend:{orientation:'h',y:-.1}}),cfg)
+ } else empty('sex','Tiada medan jantina');
+
+ if(COL.date&&COL.value){
+  const g=group(filtered('date'),COL.date).sort((a,b)=>String(a[0]).localeCompare(String(b[0]),undefined,{numeric:true}));
+  Plotly.react('trend',[{x:g.map(x=>x[0]),y:g.map(x=>x[1]),type:'scatter',mode:'lines+markers',line:{width:3}}],layout(),cfg)
+ } else empty('trend','Tiada medan tarikh');
+
+ if(COL.age&&COL.value){
+  const g=group(filtered('age'),COL.age);
+  Plotly.react('age',[{x:g.map(x=>x[0]),y:g.map(x=>x[1]),type:'bar'}],layout({xaxis:{tickangle:-55,gridcolor:'rgba(255,255,255,.07)'}}),cfg)
+ } else empty('age','Tiada medan umur');
+
+ if(COL.eth&&COL.value){
+  const g=group(filtered('eth'),COL.eth).sort((a,b)=>b[1]-a[1]);
+  Plotly.react('eth',[{x:g.map(x=>x[1]),y:g.map(x=>x[0]),type:'bar',orientation:'h'}],layout({margin:{l:110,r:18,t:25,b:52}}),cfg)
+ } else empty('eth','Tiada medan etnik');
+
+ const counts=Object.keys(RAW[0]||{}).map(k=>[k,RAW.filter(r=>r[k]!==null&&r[k]!==undefined&&r[k]!=='').length]);
+ Plotly.react('summary',[{x:counts.map(x=>x[1]),y:counts.map(x=>x[0]),type:'bar',orientation:'h'}],layout({margin:{l:100,r:18,t:25,b:52}}),cfg);
+
+ renderTable(rows);
+}
+function empty(id,msg){Plotly.react(id,[],layout({annotations:[{text:msg,showarrow:false,font:{color:'#9fb0c4'}}]}),cfg)}
+function renderTable(rows){
+ const s=document.getElementById('search').value.toLowerCase().trim();
+ if(s)rows=rows.filter(r=>Object.values(r).some(v=>String(v??'').toLowerCase().includes(s)));
+ const t=document.getElementById('tbl'); if(!rows.length){t.innerHTML='<tr><td>Tiada rekod.</td></tr>';return}
+ const h=Object.keys(rows[0]);t.innerHTML='<thead><tr>'+h.map(x=>`<th>${x}</th>`).join('')+'</tr></thead><tbody>'+rows.slice(0,1000).map(r=>'<tr>'+h.map(x=>`<td>${r[x]??''}</td>`).join('')+'</tr>').join('')+'</tbody>'
+}
+async function init(){
+ try{
+  const res=await fetch(API,{headers:{'Accept':'application/json'}});
+  if(!res.ok)throw new Error('HTTP '+res.status);
+  const data=await res.json();
+  RAW=Array.isArray(data)?data:(data.data||data.results||[]);
+  if(!RAW.length)throw new Error('API tidak memulangkan rekod');
+  COL={date:findCol(cand.date),sex:findCol(cand.sex),age:findCol(cand.age),eth:findCol(cand.eth),value:findCol(cand.value)};
+  fill('fDate',COL.date);fill('fSex',COL.sex);fill('fAge',COL.age);fill('fEth',COL.eth);smartDefaults();
+  ['fDate','fSex','fAge','fEth','search'].forEach(id=>document.getElementById(id).addEventListener(id==='search'?'input':'change',update));
+  document.getElementById('status').textContent='✅ '+RAW.length.toLocaleString('ms-MY')+' rekod dimuatkan';
+  update()
+ }catch(e){
+  console.error(e);document.getElementById('status').textContent='⚠️ Gagal memuatkan data';
+  const x=document.getElementById('err');x.style.display='block';x.innerHTML='<b>Data tidak dapat dimuatkan.</b><br>'+e.message+'<br><span class="small">Versi ini menggunakan API Data Catalogue Malaysia. Jika rangkaian organisasi menyekat api.data.gov.my, cuba buka menggunakan rangkaian biasa/mobile hotspot.</span>'
+ }
+}
+init();
+</script>
+</body>
+</html>
